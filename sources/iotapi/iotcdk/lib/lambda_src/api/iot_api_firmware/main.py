@@ -426,7 +426,7 @@ def generate_firmware(params):
                     with open(zip_path, mode='rb') as binary_file:
                         binary_content = binary_file.read()
 
-                    res = base64.encodestring(binary_content)
+                    res = base64.encodebytes(binary_content)
 
                     # return {
                     #     'headers': { "Content-Type": "image/png" },

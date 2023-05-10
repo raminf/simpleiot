@@ -5,18 +5,11 @@
  */
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import {ObjectOwnership} from "aws-cdk-lib/aws-s3";
 import s3 = require('aws-cdk-lib/aws-s3');
-import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import cf = require('aws-cdk-lib/aws-cloudfront')
-import cfo = require('aws-cdk-lib/aws-cloudfront-origins')
 import s3deploy = require('aws-cdk-lib/aws-s3-deployment')
 import {Common} from './common'
-import {BucketAccessControl} from "aws-cdk-lib/aws-s3";
-import * as iam from 'aws-cdk-lib/aws-iam';
-import { AutoDeleteBucket } from '@pmoscode/auto-delete-bucket';
-import {CDKLambdaLayer} from "./cdk_lambdalayer";
-import {CDKStaticIOT} from "./cdk_staticiot";
-import {CDKTimestream} from "./cdk_timestream";
 
 const path = require( "path" )
 
@@ -80,7 +73,8 @@ export class CDKS3 extends cdk.NestedStack {
             accessControl: s3.BucketAccessControl.LOG_DELIVERY_WRITE,
             // serverAccessLogsPrefix: "LOGS",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            autoDeleteObjects: true
+            autoDeleteObjects: true,
+            objectOwnership: ObjectOwnership.OBJECT_WRITER
         }
     );
 
@@ -122,7 +116,8 @@ export class CDKS3 extends cdk.NestedStack {
             accessControl: s3.BucketAccessControl.LOG_DELIVERY_WRITE,
             // serverAccessLogsPrefix: "LOGS",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            autoDeleteObjects: true
+            autoDeleteObjects: true,
+            objectOwnership: ObjectOwnership.OBJECT_WRITER
         }
     );
 
@@ -154,7 +149,8 @@ export class CDKS3 extends cdk.NestedStack {
             accessControl: s3.BucketAccessControl.LOG_DELIVERY_WRITE,
             // serverAccessLogsPrefix: "LOGS",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            autoDeleteObjects: true
+            autoDeleteObjects: true,
+            objectOwnership: ObjectOwnership.OBJECT_WRITER
         }
     );
     const twinMediaOIA = new cf.OriginAccessIdentity(this, 'twinOIA', {
@@ -190,7 +186,8 @@ export class CDKS3 extends cdk.NestedStack {
             accessControl: s3.BucketAccessControl.LOG_DELIVERY_WRITE,
             // serverAccessLogsPrefix: "LOGS",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            autoDeleteObjects: true
+            autoDeleteObjects: true,
+            objectOwnership: ObjectOwnership.OBJECT_WRITER
         }
     )
 
@@ -204,7 +201,8 @@ export class CDKS3 extends cdk.NestedStack {
             accessControl: s3.BucketAccessControl.LOG_DELIVERY_WRITE,
             // serverAccessLogsPrefix: "LOGS",
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            autoDeleteObjects: true
+            autoDeleteObjects: true,
+            objectOwnership: ObjectOwnership.OBJECT_WRITER
         }
     )
     // We don't allow read access to the bucket, but set it so the contents can be

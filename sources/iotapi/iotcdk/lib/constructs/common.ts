@@ -25,7 +25,7 @@ export class Common {
     // Returns the python runtime version used for all lambda layers.
     //
     public static pythonRuntimeVersion() {
-        return lambda.Runtime.PYTHON_3_8;
+        return lambda.Runtime.PYTHON_3_10;
     }
     // Utility to add mulitple tags to a construct
     //

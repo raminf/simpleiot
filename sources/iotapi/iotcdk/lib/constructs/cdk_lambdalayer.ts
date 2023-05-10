@@ -28,7 +28,7 @@
  *
  *        iotapp -> ../iotcdk/lib/lambda_src/layers/iot_app_layer/python/lib/python{version}/site-packages/iotapp
  *
- * Under MacOS, you can change the link by deleteing the iotapp link and re-creating it to point at the proper
+ * Under MacOS, you can change the link by deleting the iotapp link and re-creating it to point at the proper
  * python version before doing a database load. For example, to point at python3.8:
  *
  * % cd simpleiot/sources/iotapi/db

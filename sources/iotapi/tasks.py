@@ -14,7 +14,7 @@ import requests
 from urllib.parse import urlparse
 from rich import print
 from rich.color import Color
-from rich.console import Console, ConsoleOptions, RenderGroup, RenderResult
+from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 from rich.table import Table

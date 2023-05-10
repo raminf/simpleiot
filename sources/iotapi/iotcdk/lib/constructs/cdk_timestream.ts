@@ -46,6 +46,6 @@ export class CDKTimestream extends cdk.NestedStack {
 
         // NOTE: the timestream table needs to wait until the timestream database has been created.
         //
-        this.timestreamIoTTable.addDependsOn(this.timestreamDatabase);
+        this.timestreamIoTTable.addDependency(this.timestreamDatabase);
     }
 }
