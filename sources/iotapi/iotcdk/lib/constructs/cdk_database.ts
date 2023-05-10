@@ -93,6 +93,7 @@ export class CDKDatabase extends cdk.NestedStack {
                       })
                   }
               ],
+              machineImage: ec2.MachineImage.latestAmazonLinux2(),
               instanceName: bastion_instance_name,
               securityGroup: bastionSecurityGroup,
               subnetSelection: {subnetType: ec2.SubnetType.PUBLIC},

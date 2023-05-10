@@ -10,3 +10,4 @@ chardet
 cffi
 cryptography
 six
+urllib3<2
