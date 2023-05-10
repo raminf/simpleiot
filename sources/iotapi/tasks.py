@@ -10,6 +10,7 @@ from invoke.executor import Executor
 
 import json
 import os
+import random
 import requests
 from urllib.parse import urlparse
 from rich import print
@@ -36,14 +37,21 @@ LICENSE_DIR = "license"
 DEFAULTS_CONFIG_PATH = os.path.abspath(os.path.join("iotcdk", "installer", "defaults.json"))
 
 #
-# This should ordinarily be false, so if installation fails, CDK tries to clean up the stack.
-# But if something breaks badly and you need to go inspect the stack, set this to True.
-# It will add a --no-rollback flag to cdk deploy so the stacks are kept in place and you can
-# go look at the logs and resources to help debug problems.
+# This should ordinarily be True, so if installation fails, CDK tries to clean up the stack.
+# You still should run 'invoke clean --team={team}' to clean up the keypairs, etc that were
+# created before the CDK was invoked.
 #
-# If so, you are responsible for deleting the stacks.
+# If something breaks badly and you need to go inspect the stack, set this to False.
+# You can do it here, or via the command line or by running bootstrap then deploy and passing
+# rollback=False to the deploy command).
 #
-PREVENT_ROLLBACK_ON_FAIL_FOR_DEBUGGING = False
+# If set to False, it will add a --no-rollback flag to cdk deploy so the stacks are kept in place
+# and you can go look at the logs and resources to help debug problems.
+#
+# If this is set to False, you are responsible for deleting the stacks manually in
+# the CloudFormation console.
+#
+ROLLBACK_ON_FAIL = True
 
 #
 # If False, we use a single RDS/Aurora instance. If True, we create an Aurora serverless cluster.
@@ -265,14 +273,14 @@ def bootstrap(c, team=None):
 # NOTE: at this stage we require a team name to proceed.
 #
 @task()
-def deploy(c, team=None):
-    global PREVENT_ROLLBACK_ON_FAIL_FOR_DEBUGGING
+def deploy(c, team=None, rollback=True):
+    global ROLLBACK_ON_FAIL
 
     start_time = timer()
     iot_endpoint = None
     cert_path = None
 
-    if PREVENT_ROLLBACK_ON_FAIL_FOR_DEBUGGING:
+    if not ROLLBACK_ON_FAIL:
         rollback = "--no-rollback"
     else:
         rollback = ""
@@ -300,6 +308,12 @@ def deploy(c, team=None):
 
             #print(f"Outbound IP address: {my_ip}")
 
+            # NOTE: added TMP creation before 'cdk deploy' to avoid docker filessytem issues
+            # reported on this ticket on CDK: https://github.com/aws/aws-cdk/issues/21379
+            #
+            random_tmp_suffix = int(random.random()*10000000000000)
+            tmp_dir = f"tmp-{random_tmp_suffix}"
+
             result = c.run(f"export IOT_DEFAULTS_FILE='{DEFAULTS_CONFIG_PATH}'; \
                     export IOT_TEAM_PATH='{team_path}'; \
                     export MY_IP='{my_ip}'; \
@@ -308,7 +322,7 @@ def deploy(c, team=None):
                     export DATABASE_USE_AURORA='{DATABASE_USE_AURORA}'; \
                     cd iotcdk; \
                     npm run build; \
-                    cdk deploy {stack_config} \
+                    mkdir {tmp_dir} && export TMP=$PWD/{tmp_dir} && cdk deploy {stack_config} \
                         --profile {aws_profile} \
                         --require-approval never \
                         {rollback} \
@@ -524,6 +538,39 @@ def cleanup_bootstrap_and_local_artifacts(c, team, aws_profile):
     else:
         print(f"Local settings for team [{team}] not found.")
 
+
+#
+# Certain organization rules add an SSM policy to IAM roles AFTER a stack has been created.
+# This will prevent CDK to delete the stack when cleaning. For an example, see:
+# https://github.com/aws/aws-cdk/issues/15024
+#
+# You can manually delete the added policy using the AWS CLI, but we use the boto3 SDK
+# to do the same thing.
+#
+# NOTE: we ignore exceptions, in case this is not an issue, it will continue working as normal.
+#
+def clean_stray_ssm_policy_roles(aws_profile):
+    try:
+        import boto3
+        session = boto3.Session(profile_name=aws_profile)
+        client = session.client('iam')
+
+        roles = []
+        response = client.list_roles()
+        roles.extend(response['Roles'])
+        while 'Marker' in response.keys():
+            response = client.list_roles(Marker=response['Marker'])
+            roles.extend(response['Roles'])
+
+        for role in roles:
+            role_name = role['RoleName']
+            if "dbbastionhostInstance" in role_name:
+                client.detach_role_policy(RoleName=role_name,
+                                          PolicyArn='arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore')
+                print(f"Extra attached role policy deleted.")
+                break
+    except Exception as e:
+        pass
 #
 # Clean up the installation. This invokes a CDK clean but also performs
 # local cleanup tasks. If the stack was run BEFORE cdk deploy was finished
@@ -553,6 +600,7 @@ def clean(c, team):
         if Path(config_path).exists():
             my_ip = get_my_ip()
             print(f"Cleaning up the cloud stack for team: {team}")
+            clean_stray_ssm_policy_roles(aws_profile)
             result = c.run(f"export IOT_DEFAULTS_FILE='{DEFAULTS_CONFIG_PATH}'; \
                         export IOT_TEAM_PATH='{team_path}'; \
                         export MY_IP='{my_ip}'; \

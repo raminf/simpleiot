@@ -74,6 +74,24 @@ def format_all(recs):
     return return_data
 
 
+# Attempt to determine if a file is binary or text. We run template on text files only
+#
+def skip_run_template(filename):
+    print(f"Checking {filename}")
+    result = True
+
+    try:
+        textchars = bytearray({7, 8, 9, 10, 12, 13, 27} | set(range(0x20, 0x100)) - {0x7f})
+        check_binary = lambda bytes: bool(bytes.translate(None, textchars))
+        is_binary = check_binary(open(filename, 'rb').read(1024))
+        if not is_binary:
+            result = False
+    except Exception as e:
+        ldebug("ERROR checking binary")
+        traceback.print_exc()
+    return result
+
+
 # To generate firmware we need to get the project and serial number.
 # These are then used to look up the right model and certificates.
 #
@@ -245,11 +263,21 @@ def process_generator(project,
 
     for dirpath, dirs, files in os.walk(downloaded_generator_root):
         tempdir = os.path.join(temproot, generator.name)
-        #ldebug(f"Output TEMPDIR: {tempdir}")
+        # ldebug(f"Output TEMPDIR: {tempdir}")
         os.makedirs(tempdir, exist_ok=True)
         for filename in files:
-            if filename.startswith('.'): continue
+            if filename.startswith('.'):
+                continue
+
             srcname = os.path.join(dirpath, filename)
+
+            #
+            # If file is binary, we skip running it through template processor.
+            #
+            if skip_run_template(srcname):
+                ldebug(f"File {srcname} is binary. Skipping running template.")
+                continue
+            #
             #
             # If it's an Arduino .ino file, the name of the file MUST match the outer directory.
             # so we rename the ino file to the name of the directory so the Arduino IDE doesn't
@@ -261,26 +289,26 @@ def process_generator(project,
             else:
                 dstname = os.path.join(tempdir, filename)
 
-            with open(srcname, "r") as input:
+            with open(srcname, "r", encoding="utf8") as input:
                 body = input.read()
-            #ldebug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>")
-            #ldebug(f"InFile: {srcname}\n{body}")
-            #ldebug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+            # ldebug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+            # ldebug(f"InFile: {srcname}\n{body}")
+            # ldebug(f">>>>>>>>>>>>>>>>>>>>>>>>>>>>")
             rendered = jinja2.Template(open(srcname).read(), trim_blocks=True, lstrip_blocks=True).render(
                 generator_data)
-            #ldebug(f"<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-            #ldebug(f"OutFile: {dstname}\n{rendered}")
-            #ldebug(f"<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+            # ldebug(f"<<<<<<<<<<<<<<<<<<<<<<<<<<<")
+            # ldebug(f"OutFile: {dstname}\n{rendered}")
+            # ldebug(f"<<<<<<<<<<<<<<<<<<<<<<<<<<<")
 
             with open(dstname, "w") as output:
                 output.write(rendered)
 
-            #ldebug(f" -- {srcname} -> {dstname}")
+            # ldebug(f" -- {srcname} -> {dstname}")
 
     output_zip_root = f"{generator.name}-{opsys_str}-{processor_str}"
     output_zip_name = f"{output_zip_root}.zip"
     output_zip_path = os.path.join(temproot, output_zip_name)
-    #ldebug(f"Generating zip to path: {output_zip_path} - file: {output_zip_name} - temproot: {temproot}")
+    # ldebug(f"Generating zip to path: {output_zip_path} - file: {output_zip_name} - temproot: {temproot}")
 
     zip_dir_to_file(output_zip_path, tempdir)
 
@@ -290,7 +318,7 @@ def process_generator(project,
 
     rootexists = os.path.exists(tempdir)
     exists = os.path.exists(output_zip_path)
-    #ldebug(f"Output zip: {output_zip_path} - root: {rootexists} - exists: {exists}")
+    # ldebug(f"Output zip: {output_zip_path} - root: {rootexists} - exists: {exists}")
 
     return temproot, output_zip_name, output_zip_path
 
@@ -320,8 +348,13 @@ def generate_firmware(params):
         if generator_id:
             generator_uuid = uuid.UUID(generator_id)
             generator = Generator.get(id=generator_uuid)
-            ldebug(f"Found generator: {generator.name}")
-        else:
+            if generator:
+                ldebug(f"Found generator: {generator.name}")
+            else:
+                ldebug(f"ERROR: Could not find generator with id")
+
+        if not generator:
+            ldebug(f"No generator found by ID. Continuing search...")
             manufacturer_str = params.get("manufacturer", "")
             processor_str = params.get("processor", "")
             os_str = params.get("os", "")
@@ -342,127 +375,130 @@ def generate_firmware(params):
                                       os=opsys,
                                       processor=processor,
                                       name=generator_name)
-            ldebug(f"Found generator with data: {generator.name}")
-
-        device_id = params.get("device_id", None)
-        if device_id:
-            device_uuid = uuid.UUID(device_id)
-            device = Device.get(id=device_uuid)
-            if device:
-                ldebug(f"Found device: {device.serial_number}")
-                model = device.model
-                project = model.model_project
-            else:
-                ldebug(f"Could not find device with uuid: {device_uuid.hex}")
-
-        # If no device found using device_id, we're going to try to get it
-        # based on provided project and serial number.
-        #
-        if not device:
-            serial = params.get("serial", None)
-            if not serial:
-                code = 418
-                result = {"status": "error", "message": "'Serial' field missing"}
-            else:
-                ldebug(f"Getting device with serial/project/model: {serial}")
-                project = find_project(params)
-                if project:
-                    device = Device.select(lambda d: d.device_project == project and
-                                                     d.serial_number == serial).first()
+            if generator:
+                ldebug(f"Found generator with data: {generator_name}")
+                device_id = params.get("device_id", None)
+                if device_id:
+                    device_uuid = uuid.UUID(device_id)
+                    device = Device.get(id=device_uuid)
                     if device:
+                        ldebug(f"Found device: {device.serial_number}")
                         model = device.model
+                        project = model.model_project
                     else:
-                        ldebug(f"ERROR: could not find device with serial #{serial}")
-                        code = 428
-                        result = {"status": "error", "message": f"Could not find device with serial #{serial}"}
+                        ldebug(f"Could not find device with uuid: {device_uuid.hex}")
 
-        if model and device:
-            ldebug(f"Getting datatypes for model: {model.name}")
-            data_types = DataType.select(lambda dt: dt.model == model)
-            data_list = []
-            for type in data_types:
-                ldebug(f"Getting datatype details: {type.name}")
-                one = {
-                    "name": type.name,
-                    "allow_modify": type.allow_modify,
-                    "show_on_twin": type.show_on_twin
-                }
-                udi = type.udi
-                if udi:
-                    one["udi"] = udi
-                variable_type = type.data_type
-                if variable_type:
-                    one["type"] = variable_type
-                units = type.units
-                if units:
-                    one["units"] = units
-                label_template = type.label_template
-                if label_template:
-                    one["label_template"] = label_template
-            data_list.append(one)
+                # If no device found using device_id, we're going to try to get it
+                # based on provided project and serial number.
+                #
+                if not device:
+                    serial = params.get("serial", None)
+                    if not serial:
+                        code = 418
+                        result = {"status": "error", "message": "'Serial' field missing"}
+                    else:
+                        ldebug(f"Getting device with serial/project/model: {serial}")
+                        project = find_project(params)
+                        if project:
+                            device = Device.select(lambda d: d.device_project == project and
+                                                             d.serial_number == serial).first()
+                            if device:
+                                model = device.model
+                            else:
+                                ldebug(f"ERROR: could not find device with serial #{serial}")
+                                code = 418
+                                result = {"status": "error", "message": f"Could not find device with serial #{serial}"}
 
-            if not generator:
-                ldebug(f"ERROR: no generator of this type found")
-                code = 428
-                result = {"status": "error", "message": f"ERROR: no Generator of this type found"}
-            else:
-                ldebug(f"Downloading generator to temp for: {generator.name}")
-                downloaded_generator_root = download_generator_to_temp(generator)
+                if model and device:
+                    ldebug(f"Getting datatypes for model: {model.name}")
+                    data_types = DataType.select(lambda dt: dt.model == model)
+                    data_list = []
+                    for type in data_types:
+                        ldebug(f"Getting datatype details: {type.name}")
+                        one = {
+                            "name": type.name,
+                            "allow_modify": type.allow_modify,
+                            "show_on_twin": type.show_on_twin
+                        }
+                        udi = type.udi
+                        if udi:
+                            one["udi"] = udi
+                        variable_type = type.data_type
+                        if variable_type:
+                            one["type"] = variable_type
+                        units = type.units
+                        if units:
+                            one["units"] = units
+                        label_template = type.label_template
+                        if label_template:
+                            one["label_template"] = label_template
+                    data_list.append(one)
 
-                wifi_ssid = params.get("wifi_ssid", "[[ ENTER WIFI SSID]]")
-                wifi_password = params.get("wifi_password", "[[ ENTER WIFI PASSWORD]")
+                    if not generator:
+                        ldebug(f"ERROR: no generator of this type found")
+                        code = 418
+                        result = {"status": "error", "message": f"ERROR: no Generator of this type found"}
+                    else:
+                        ldebug(f"Downloading generator to temp for: {generator.name}")
+                        downloaded_generator_root = download_generator_to_temp(generator)
 
-                output_root, zip_name, zip_path = process_generator(project,
-                                                                    model,
-                                                                    device,
-                                                                    version,
-                                                                    data_list,
-                                                                    generator,
-                                                                    downloaded_generator_root.name,
-                                                                    wifi_ssid,
-                                                                    wifi_password)
-                ldebug(f"Returning Generated file: {zip_name} at path: {zip_path}.")
-                if zip_name and zip_path:
-                    with open(zip_path, mode='rb') as binary_file:
-                        binary_content = binary_file.read()
+                        wifi_ssid = params.get("wifi_ssid", "[[ ENTER WIFI SSID]]")
+                        wifi_password = params.get("wifi_password", "[[ ENTER WIFI PASSWORD]")
 
-                    res = base64.encodebytes(binary_content)
+                        output_root, zip_name, zip_path = process_generator(project,
+                                                                            model,
+                                                                            device,
+                                                                            version,
+                                                                            data_list,
+                                                                            generator,
+                                                                            downloaded_generator_root.name,
+                                                                            wifi_ssid,
+                                                                            wifi_password)
+                        ldebug(f"Returning Generated file: {zip_name} at path: {zip_path}.")
+                        if zip_name and zip_path:
+                            with open(zip_path, mode='rb') as binary_file:
+                                binary_content = binary_file.read()
 
-                    # return {
-                    #     'headers': { "Content-Type": "image/png" },
-                    #     'statusCode': 200,
-                    #     'body': base64.b64encode(image).decode('utf-8'),
-                    #     'isBase64Encoded': True
-                    # }
+                            res = base64.encodestring(binary_content)
 
-                    code = 200
-                    result = {
-                        "isBase64Encoded": True,
-                        "statusCode": code,
-                        "headers": {
-                            "Content-Type": "application/zip",
-                            "Content-Disposition": f"attachment; filename={zip_name}",
-                            "Content-Encoding": "gzip",
-                            "Access-Control-Allow-Origin": "*"
-                        },
-                        "body": base64.b64encode(binary_content).decode('utf-8')
-                    }
-                    result_str = json.dumps(result, indent=2)
-                    ldebug(f"Returning: {result_str}")
-                    return code, result
+                            # return {
+                            #     'headers': { "Content-Type": "image/png" },
+                            #     'statusCode': 200,
+                            #     'body': base64.b64encode(image).decode('utf-8'),
+                            #     'isBase64Encoded': True
+                            # }
+
+                            code = 200
+                            result = {
+                                "isBase64Encoded": True,
+                                "statusCode": code,
+                                "headers": {
+                                    "Content-Type": "application/zip",
+                                    "Content-Disposition": f"attachment; filename={zip_name}",
+                                    "Content-Encoding": "gzip",
+                                    "Access-Control-Allow-Origin": "*"
+                                },
+                                "body": base64.b64encode(binary_content).decode('utf-8')
+                            }
+                            result_str = json.dumps(result, indent=2)
+                            ldebug(f"Returning: {result_str}")
+                            return code, result
+                        else:
+                            ldebug(f"ERROR: error generating output zip")
+                            code = 418
+                            result = {"status": "error", "message": f"ERROR: error generating output zip"}
+
+                    os.remove(zip_file)
+                    downloaded_generator_root.cleanup()
+                    shutil.rmtree(output_root)
                 else:
-                    ldebug(f"ERROR: error generating output zip")
-                    code = 428
-                    result = {"status": "error", "message": f"ERROR: error generating output zip"}
-
-            os.remove(zip_file)
-            downloaded_generator_root.cleanup()
-            shutil.rmtree(output_root)
-
-        else:
-            ldebug(f"ERROR: could not find Model")
-            code = 428
-            result = {"status": "error", "message": f"Could not find Model"}
+                    ldebug(f"ERROR: could not find Model or Device")
+                    code = 418
+                    result = {"status": "error", "message": "Could not find Model or Device"}
+            else:
+                ldebug(f"ERROR: could not find generator for specified parameters")
+                code = 418
+                result = {"status": "error", "message": "Could not find generator for specified parameters"}
 
     except Exception as e:
         lerror(f"Error creating code: {str(e)}")
@@ -511,12 +547,16 @@ def lambda_handler(event, context):
         if method == "POST":
             body = event["body"]
             payload = json.loads(body)
-            code, response = generate_firmware(payload)
+            code, result = generate_firmware(payload)
+            #
+            # If this was successful, the returned data is the full lambda response with
+            # the generated binary as the body. If it's an error, then it's a standard
+            # JSON response, which should be returned and handled normally (below).
+            # NOTE: this is only for the routine because it's generating a binary attachment as
+            # a returned result.
+            #
             if code == 200:
-                return response
-            else:
-                result = json.dumps(response)
-
+                return result
         elif method == "GET":
             params = event.get("queryStringParameters", None)
             code, result = list_generators(params)
